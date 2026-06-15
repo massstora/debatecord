@@ -1,0 +1,2 @@
+"""Debatecord Discord bot package."""
+

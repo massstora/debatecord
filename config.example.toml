@@ -1,0 +1,13 @@
+# Copy this file to config.toml and fill in the IDs.
+#
+# The token may also be supplied with the DISCORD_TOKEN environment variable.
+token = "put-your-bot-token-here"
+guild_id = 111111111111111111
+
+[[rooms]]
+voice_channel_id = 222222222222222222
+text_channel_id = 333333333333333333
+mic_seconds = 180
+pickup_seconds = 10
+force_ptt = true
+
