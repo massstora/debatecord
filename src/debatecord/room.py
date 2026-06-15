@@ -17,6 +17,7 @@ log = logging.getLogger(__name__)
 class RoomState:
     queue: deque[int] = field(default_factory=deque)
     manual_speaker_ids: set[int] = field(default_factory=set)
+    manual_speaker_tasks: dict[int, asyncio.Task[None]] = field(default_factory=dict)
     current_speaker_id: int | None = None
     turn_task: asyncio.Task[None] | None = None
     advance_task: asyncio.Task[None] | None = None
@@ -31,6 +32,7 @@ class DebateRoom:
         self.admin_role_id: int | None = None
         self._lock = asyncio.Lock()
         self._speaking_event = asyncio.Event()
+        self._manual_speaking_events: dict[int, asyncio.Event] = {}
 
     @property
     def admin_role_name(self) -> str:
@@ -370,6 +372,13 @@ class DebateRoom:
     def _on_speaking(self, member: discord.Member) -> None:
         if member.id == self.state.current_speaker_id:
             self.bot.loop.call_soon_threadsafe(self._speaking_event.set)
+        if member.id in self.state.manual_speaker_ids:
+            self.bot.loop.call_soon_threadsafe(self._set_manual_speaking_event, member.id)
+
+    def _set_manual_speaking_event(self, member_id: int) -> None:
+        event = self._manual_speaking_events.get(member_id)
+        if event is not None:
+            event.set()
 
     async def _run_speaker_timer(self, member: discord.Member) -> None:
         remaining = self.config.mic_seconds
@@ -418,24 +427,41 @@ class DebateRoom:
             return self.state.current_speaker_id == member.id
 
     async def start_manual_floor(self, member: discord.Member) -> None:
+        await self.ensure_voice_connected()
         added = False
         async with self._lock:
             if member.id not in self.state.manual_speaker_ids:
                 self.state.manual_speaker_ids.add(member.id)
+                event = asyncio.Event()
+                self._manual_speaking_events[member.id] = event
+                self.state.manual_speaker_tasks[member.id] = asyncio.create_task(
+                    self._manual_floor_pickup_timeout(member, event)
+                )
                 added = True
         if added:
             await self.announce(
-                f"{member.mention} was manually unmuted. Holding the mic queue until they are muted."
+                f"{member.mention} was manually unmuted. Holding the mic queue. "
+                f"Start speaking within {self.config.pickup_seconds} seconds."
             )
             await self.announce_queue()
 
     async def end_manual_floor(self, member: discord.Member, reason: str) -> bool:
+        return await self._end_manual_floor(member, reason, mute=False)
+
+    async def _end_manual_floor(self, member: discord.Member, reason: str, mute: bool) -> bool:
         removed = False
+        task: asyncio.Task[None] | None = None
         async with self._lock:
             if member.id in self.state.manual_speaker_ids:
                 self.state.manual_speaker_ids.remove(member.id)
+                self._manual_speaking_events.pop(member.id, None)
+                task = self.state.manual_speaker_tasks.pop(member.id, None)
                 removed = True
         if removed:
+            if task is not None and task is not asyncio.current_task():
+                task.cancel()
+            if mute and not self.is_admin(member):
+                await self.ensure_member_muted(member)
             await self.announce(f"{member.mention}'s manual floor ended: {reason}.")
             await self.announce_queue()
             self.ensure_advancing()
@@ -444,3 +470,13 @@ class DebateRoom:
     async def is_manual_floor_speaker(self, member: discord.Member) -> bool:
         async with self._lock:
             return member.id in self.state.manual_speaker_ids
+
+    async def _manual_floor_pickup_timeout(
+        self, member: discord.Member, event: asyncio.Event
+    ) -> None:
+        try:
+            await asyncio.wait_for(event.wait(), timeout=self.config.pickup_seconds)
+        except asyncio.TimeoutError:
+            await self._end_manual_floor(member, "pickup timeout", mute=True)
+        except asyncio.CancelledError:
+            raise

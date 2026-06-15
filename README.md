@@ -20,7 +20,8 @@ Room admins can speak at any time.
 - If a user leaves the voice channel, they are removed from the queue.
 - If the current speaker is server-muted by an admin, their turn ends.
 - If an admin manually unmutes someone outside the queue turn, Debatecord holds
-  the queue until that person is muted again or leaves.
+  the queue. That user must transmit within the pickup window or they are muted
+  again and the queue resumes.
 
 Queue state is kept in memory. Restarting the bot clears all queues.
 
