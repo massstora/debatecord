@@ -16,6 +16,7 @@ log = logging.getLogger(__name__)
 @dataclass(slots=True)
 class RoomState:
     queue: deque[int] = field(default_factory=deque)
+    manual_speaker_ids: set[int] = field(default_factory=set)
     current_speaker_id: int | None = None
     turn_task: asyncio.Task[None] | None = None
     advance_task: asyncio.Task[None] | None = None
@@ -155,7 +156,8 @@ class DebateRoom:
             self.state.queue.append(member.id)
             position = len(self.state.queue)
 
-        await self.ensure_member_muted(member)
+        if not await self.is_manual_floor_speaker(member):
+            await self.ensure_member_muted(member)
         await self.announce(f"{member.mention} joined the mic queue at position {position}.")
         await self.announce_queue()
         self.ensure_advancing()
@@ -191,10 +193,22 @@ class DebateRoom:
                 else None
             )
             queued = [guild.get_member(user_id) for user_id in self.state.queue] if guild else []
+            manual_speakers = (
+                [guild.get_member(user_id) for user_id in self.state.manual_speaker_ids]
+                if guild
+                else []
+            )
         speaker_text = speaker.mention if speaker else "Nobody"
+        manual_names = [member.mention for member in manual_speakers if member is not None]
+        manual_text = ", ".join(manual_names) if manual_names else "Nobody"
         names = [member.mention for member in queued if member is not None]
         queue_text = ", ".join(names) if names else "empty"
-        return f"**Mic queue**\nCurrent speaker: {speaker_text}\nWaiting: {queue_text}"
+        return (
+            "**Mic queue**\n"
+            f"Current speaker: {speaker_text}\n"
+            f"Manual floor: {manual_text}\n"
+            f"Waiting: {queue_text}"
+        )
 
     async def skip(self, actor: discord.Member) -> str:
         if not self.is_admin(actor):
@@ -220,23 +234,44 @@ class DebateRoom:
         before_here = before.channel is not None and before.channel.id == self.config.voice_channel_id
         after_here = after.channel is not None and after.channel.id == self.config.voice_channel_id
 
-        if after_here and not self.is_admin(member) and member.id != self.state.current_speaker_id:
-            await self.ensure_member_muted(member)
-
         if before_here and not after_here:
             await self.remove_member(member, "left the voice channel")
+            return
 
         if after_here and member.id == self.state.current_speaker_id and not before.mute and after.mute:
             await self.end_current_turn("speaker was muted")
+            return
+
+        if not after_here or self.is_admin(member) or member.id == self.state.current_speaker_id:
+            return
+
+        if before.mute and not after.mute:
+            await self.start_manual_floor(member)
+            return
+
+        if not before.mute and after.mute:
+            if await self.end_manual_floor(member, "speaker was muted"):
+                return
+
+        if not await self.is_manual_floor_speaker(member):
+            await self.ensure_member_muted(member)
 
     async def remove_member(self, member: discord.Member, reason: str) -> None:
         was_current = False
         was_queued = False
+        was_manual = False
         async with self._lock:
             if member.id in self.state.queue:
                 self.state.queue.remove(member.id)
                 was_queued = True
+            if member.id in self.state.manual_speaker_ids:
+                self.state.manual_speaker_ids.remove(member.id)
+                was_manual = True
             was_current = member.id == self.state.current_speaker_id
+        if was_manual:
+            await self.announce(f"{member.mention}'s manual floor ended: {reason}.")
+            await self.announce_queue()
+            self.ensure_advancing()
         if was_queued:
             await self.announce(f"{member.mention} was removed from the mic queue: {reason}.")
             await self.announce_queue()
@@ -250,7 +285,10 @@ class DebateRoom:
         for member in channel.members:
             if self.is_admin(member):
                 continue
-            if member.id != self.state.current_speaker_id:
+            if (
+                member.id != self.state.current_speaker_id
+                and member.id not in self.state.manual_speaker_ids
+            ):
                 await self.ensure_member_muted(member)
 
     async def ensure_member_muted(self, member: discord.Member) -> None:
@@ -270,7 +308,7 @@ class DebateRoom:
     async def _advance_loop(self) -> None:
         while True:
             async with self._lock:
-                if self.state.current_speaker_id is not None:
+                if self.state.current_speaker_id is not None or self.state.manual_speaker_ids:
                     return
                 next_id = self._pop_next_valid_user_id()
                 if next_id is None:
@@ -378,3 +416,31 @@ class DebateRoom:
     async def _is_current_speaker(self, member: discord.Member) -> bool:
         async with self._lock:
             return self.state.current_speaker_id == member.id
+
+    async def start_manual_floor(self, member: discord.Member) -> None:
+        added = False
+        async with self._lock:
+            if member.id not in self.state.manual_speaker_ids:
+                self.state.manual_speaker_ids.add(member.id)
+                added = True
+        if added:
+            await self.announce(
+                f"{member.mention} was manually unmuted. Holding the mic queue until they are muted."
+            )
+            await self.announce_queue()
+
+    async def end_manual_floor(self, member: discord.Member, reason: str) -> bool:
+        removed = False
+        async with self._lock:
+            if member.id in self.state.manual_speaker_ids:
+                self.state.manual_speaker_ids.remove(member.id)
+                removed = True
+        if removed:
+            await self.announce(f"{member.mention}'s manual floor ended: {reason}.")
+            await self.announce_queue()
+            self.ensure_advancing()
+        return removed
+
+    async def is_manual_floor_speaker(self, member: discord.Member) -> bool:
+        async with self._lock:
+            return member.id in self.state.manual_speaker_ids
