@@ -19,6 +19,7 @@ class RoomState:
     current_speaker_id: int | None = None
     turn_task: asyncio.Task[None] | None = None
     advance_task: asyncio.Task[None] | None = None
+    instruction_task: asyncio.Task[None] | None = None
 
 
 class DebateRoom:
@@ -69,6 +70,7 @@ class DebateRoom:
             await self._apply_ptt_permissions(voice_channel, role)
 
         await self.reconcile_voice_state()
+        self.ensure_instruction_reminders()
 
     async def _apply_ptt_permissions(
         self, voice_channel: discord.VoiceChannel, admin_role: discord.Role
@@ -106,6 +108,36 @@ class DebateRoom:
         channel = self.text_channel
         if channel is not None:
             await channel.send(message)
+
+    def instruction_message(self) -> str:
+        minutes = self.config.mic_seconds // 60
+        seconds = self.config.mic_seconds % 60
+        if minutes and seconds:
+            timer_text = f"{minutes}m {seconds}s"
+        elif minutes:
+            timer_text = f"{minutes}m"
+        else:
+            timer_text = f"{seconds}s"
+
+        return (
+            "**Mic queue instructions**\n"
+            "Join this voice channel, then use `/getmic` here to enter the mic queue.\n"
+            "Use `/dropmic` to leave the queue or give up the mic during your turn.\n"
+            f"When your turn starts, begin speaking within {self.config.pickup_seconds} seconds. "
+            f"Your mic time is {timer_text}."
+        )
+
+    def ensure_instruction_reminders(self) -> None:
+        if self.config.instruction_interval_seconds <= 0:
+            return
+        if self.state.instruction_task is None or self.state.instruction_task.done():
+            self.state.instruction_task = asyncio.create_task(self._instruction_reminder_loop())
+
+    async def _instruction_reminder_loop(self) -> None:
+        await self.announce(self.instruction_message())
+        while self.config.instruction_interval_seconds > 0:
+            await asyncio.sleep(self.config.instruction_interval_seconds)
+            await self.announce(self.instruction_message())
 
     async def add_to_queue(self, member: discord.Member) -> str:
         async with self._lock:

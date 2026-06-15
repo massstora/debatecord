@@ -12,6 +12,7 @@ class RoomConfig:
     text_channel_id: int
     mic_seconds: int = 180
     pickup_seconds: int = 10
+    instruction_interval_seconds: int = 3600
     force_ptt: bool = False
 
 
@@ -37,4 +38,3 @@ def load_config(path: str | Path) -> BotConfig:
         raise ValueError("At least one [[rooms]] entry is required")
 
     return BotConfig(token=token, guild_id=int(data["guild_id"]), rooms=rooms)
-

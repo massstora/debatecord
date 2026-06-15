@@ -18,6 +18,7 @@ voice_channel_id = 456
 text_channel_id = 789
 mic_seconds = 90
 pickup_seconds = 5
+instruction_interval_seconds = 600
 force_ptt = true
 """.strip(),
         encoding="utf-8",
@@ -32,6 +33,7 @@ force_ptt = true
     assert config.rooms[0].text_channel_id == 789
     assert config.rooms[0].mic_seconds == 90
     assert config.rooms[0].pickup_seconds == 5
+    assert config.rooms[0].instruction_interval_seconds == 600
     assert config.rooms[0].force_ptt is True
 
 
@@ -60,4 +62,3 @@ def test_requires_at_least_one_room(tmp_path, monkeypatch) -> None:
 
     with pytest.raises(ValueError, match=r"At least one \[\[rooms\]\] entry"):
         load_config(config_file)
-

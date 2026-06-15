@@ -9,5 +9,5 @@ voice_channel_id = 222222222222222222
 text_channel_id = 333333333333333333
 mic_seconds = 180
 pickup_seconds = 10
+instruction_interval_seconds = 3600
 force_ptt = true
-

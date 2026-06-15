@@ -66,6 +66,7 @@ voice_channel_id = 222222222222222222
 text_channel_id = 333333333333333333
 mic_seconds = 180
 pickup_seconds = 10
+instruction_interval_seconds = 3600
 force_ptt = true
 ```
 
@@ -75,6 +76,10 @@ environment variable.
 `force_ptt = true` denies the Discord `Use Voice Activity` permission for
 `@everyone` in that voice channel and allows it for the room admin role. That
 effectively forces Push-to-Talk for regular users.
+
+`instruction_interval_seconds` controls how often Debatecord posts room
+instructions explaining `/getmic` and `/dropmic`. Set it to `0` to disable
+recurring instruction messages.
 
 ## Running Locally
 
@@ -113,4 +118,3 @@ is currently in.
 Run Debatecord as a long-lived process on a VPS or other always-on server. A
 simple `systemd` service is usually enough. The bot needs stable outbound
 network access and UDP connectivity for Discord voice.
-
