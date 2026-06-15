@@ -109,6 +109,9 @@ class DebateRoom:
         if channel is not None:
             await channel.send(message)
 
+    async def announce_queue(self) -> None:
+        await self.announce(await self.queue_status_message())
+
     def instruction_message(self) -> str:
         minutes = self.config.mic_seconds // 60
         seconds = self.config.mic_seconds % 60
@@ -154,31 +157,44 @@ class DebateRoom:
 
         await self.ensure_member_muted(member)
         await self.announce(f"{member.mention} joined the mic queue at position {position}.")
+        await self.announce_queue()
         self.ensure_advancing()
         return f"You joined the mic queue at position {position}."
 
     async def drop_from_queue(self, member: discord.Member) -> str:
+        dropped_from_queue = False
         should_end_turn = False
         async with self._lock:
             if member.id in self.state.queue:
                 self.state.queue.remove(member.id)
-                return "You left the mic queue."
+                dropped_from_queue = True
             should_end_turn = member.id == self.state.current_speaker_id
 
+        if dropped_from_queue:
+            await self.announce(f"{member.mention} left the mic queue.")
+            await self.announce_queue()
+            return "You left the mic queue."
         if should_end_turn:
             await self.end_current_turn("speaker dropped the mic")
             return "Your mic turn has ended."
         return "You are not in the mic queue."
 
     async def status(self) -> str:
+        return await self.queue_status_message()
+
+    async def queue_status_message(self) -> str:
         guild = self.guild
         async with self._lock:
-            speaker = guild.get_member(self.state.current_speaker_id) if guild and self.state.current_speaker_id else None
+            speaker = (
+                guild.get_member(self.state.current_speaker_id)
+                if guild and self.state.current_speaker_id
+                else None
+            )
             queued = [guild.get_member(user_id) for user_id in self.state.queue] if guild else []
         speaker_text = speaker.mention if speaker else "Nobody"
         names = [member.mention for member in queued if member is not None]
         queue_text = ", ".join(names) if names else "empty"
-        return f"Current speaker: {speaker_text}\nQueue: {queue_text}"
+        return f"**Mic queue**\nCurrent speaker: {speaker_text}\nWaiting: {queue_text}"
 
     async def skip(self, actor: discord.Member) -> str:
         if not self.is_admin(actor):
@@ -192,6 +208,7 @@ class DebateRoom:
         async with self._lock:
             self.state.queue.clear()
         await self.announce(f"The mic queue was cleared by {actor.mention}.")
+        await self.announce_queue()
         return "Cleared the mic queue."
 
     async def on_voice_state_update(
@@ -214,10 +231,15 @@ class DebateRoom:
 
     async def remove_member(self, member: discord.Member, reason: str) -> None:
         was_current = False
+        was_queued = False
         async with self._lock:
             if member.id in self.state.queue:
                 self.state.queue.remove(member.id)
+                was_queued = True
             was_current = member.id == self.state.current_speaker_id
+        if was_queued:
+            await self.announce(f"{member.mention} was removed from the mic queue: {reason}.")
+            await self.announce_queue()
         if was_current:
             await self.end_current_turn(reason)
 
@@ -270,6 +292,7 @@ class DebateRoom:
                 f"{member.mention} has the mic. Start speaking within "
                 f"{self.config.pickup_seconds} seconds."
             )
+            await self.announce_queue()
 
             try:
                 await asyncio.wait_for(self._speaking_event.wait(), timeout=self.config.pickup_seconds)
@@ -349,6 +372,7 @@ class DebateRoom:
         if not self.is_admin(member):
             await self.ensure_member_muted(member)
         await self.announce(f"{member.mention}'s mic turn ended: {reason}.")
+        await self.announce_queue()
         self.ensure_advancing()
 
     async def _is_current_speaker(self, member: discord.Member) -> bool:

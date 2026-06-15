@@ -15,6 +15,7 @@ Room admins can speak at any time.
 - The user must transmit audio within the pickup window, defaulting to 10 seconds.
 - Once audio is detected, their mic timer starts.
 - The bot posts remaining-time messages every 30 seconds.
+- The bot announces the updated mic queue after queue and speaker changes.
 - When the timer expires, the user is muted and the next queued user gets the mic.
 - If a user leaves the voice channel, they are removed from the queue.
 - If the current speaker is server-muted by an admin, their turn ends.
