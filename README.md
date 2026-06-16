@@ -373,3 +373,7 @@ The bot starts but does not detect speaking:
 - Prefer `DISCORD_TOKEN` or a systemd environment file for production.
 - Treat the Discord bot token like a password.
 - If a token is leaked, reset it in the Discord Developer Portal.
+
+## License
+
+Debatecord is released under the MIT License. See [LICENSE](LICENSE).
