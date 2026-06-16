@@ -17,6 +17,8 @@ Queue state is kept in memory. Restarting the bot clears all queues.
 - The speaker must transmit audio within the pickup window, defaulting to 10
   seconds.
 - The mic timer starts only after actual voice transmission is detected.
+- If the speaker stops transmitting for the silence timeout, defaulting to 5
+  seconds, their turn ends early.
 - Remaining-time announcements are posted every 30 seconds.
 - Queue updates are announced after speaker and queue changes.
 - Users who leave the voice channel are removed from the queue.
@@ -151,6 +153,7 @@ voice_channel_id = 222222222222222222
 text_channel_id = 333333333333333333
 mic_seconds = 180
 pickup_seconds = 10
+silence_timeout_seconds = 5
 instruction_interval_seconds = 3600
 force_ptt = true
 ```
@@ -170,6 +173,8 @@ Room settings:
   detected.
 - `pickup_seconds`: how long a user has to start transmitting after being
   unmuted.
+- `silence_timeout_seconds`: how long a speaker may stop transmitting before
+  Debatecord ends their turn and moves on.
 - `instruction_interval_seconds`: how often to post room instructions. Set to
   `0` to disable recurring reminders.
 - `force_ptt`: when `true`, Debatecord denies `Use Voice Activity` for
@@ -184,6 +189,7 @@ voice_channel_id = 222222222222222222
 text_channel_id = 333333333333333333
 mic_seconds = 180
 pickup_seconds = 10
+silence_timeout_seconds = 5
 instruction_interval_seconds = 3600
 force_ptt = true
 
@@ -192,6 +198,7 @@ voice_channel_id = 444444444444444444
 text_channel_id = 555555555555555555
 mic_seconds = 120
 pickup_seconds = 10
+silence_timeout_seconds = 5
 instruction_interval_seconds = 1800
 force_ptt = false
 ```
@@ -301,7 +308,8 @@ Normal user flow:
 3. Type `/getmic` in the room text channel.
 4. Wait for your turn.
 5. When Debatecord unmutes you, start speaking within the pickup window.
-6. Speak until your time expires or you use `/dropmic`.
+6. Speak until your time expires, you stop transmitting long enough for the
+   silence timeout, or you use `/dropmic`.
 
 ## Room Admin Commands
 
@@ -318,6 +326,8 @@ Admins can also use Discord's native voice controls:
 - Manually unmuting a non-current user gives that user the floor and holds the
   queue.
 - If a manually unmuted user does not transmit within the pickup window,
+  Debatecord mutes them again and resumes the queue.
+- If a manually unmuted user stops transmitting for the silence timeout,
   Debatecord mutes them again and resumes the queue.
 - Muting a manually unmuted user releases the hold and resumes the queue.
 

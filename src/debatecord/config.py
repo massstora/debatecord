@@ -12,6 +12,7 @@ class RoomConfig:
     text_channel_id: int
     mic_seconds: int = 180
     pickup_seconds: int = 10
+    silence_timeout_seconds: int = 5
     instruction_interval_seconds: int = 3600
     force_ptt: bool = False
 

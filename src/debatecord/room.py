@@ -32,6 +32,7 @@ class DebateRoom:
         self.admin_role_id: int | None = None
         self._lock = asyncio.Lock()
         self._speaking_event = asyncio.Event()
+        self._speaker_activity_event = asyncio.Event()
         self._manual_speaking_events: dict[int, asyncio.Event] = {}
 
     @property
@@ -372,6 +373,7 @@ class DebateRoom:
     def _on_speaking(self, member: discord.Member) -> None:
         if member.id == self.state.current_speaker_id:
             self.bot.loop.call_soon_threadsafe(self._speaking_event.set)
+            self.bot.loop.call_soon_threadsafe(self._speaker_activity_event.set)
         if member.id in self.state.manual_speaker_ids:
             self.bot.loop.call_soon_threadsafe(self._set_manual_speaking_event, member.id)
 
@@ -381,20 +383,40 @@ class DebateRoom:
             event.set()
 
     async def _run_speaker_timer(self, member: discord.Member) -> None:
-        remaining = self.config.mic_seconds
-        await self.announce(f"{member.mention}'s mic timer started: {remaining} seconds.")
+        loop = asyncio.get_running_loop()
+        started_at = loop.time()
+        time_expires_at = started_at + self.config.mic_seconds
+        silence_expires_at = started_at + self.config.silence_timeout_seconds
+        next_warning_at = started_at + min(30, self.config.mic_seconds)
+        self._speaker_activity_event.clear()
 
-        while remaining > 0:
-            sleep_for = min(30, remaining)
-            await asyncio.sleep(sleep_for)
-            remaining -= sleep_for
+        await self.announce(f"{member.mention}'s mic timer started: {self.config.mic_seconds} seconds.")
 
-            if member.id != self.state.current_speaker_id:
+        while await self._is_current_speaker(member):
+            now = loop.time()
+            if now >= time_expires_at:
+                await self._finish_member_turn(member, "time expired")
                 return
-            if remaining > 0:
-                await self.announce(f"{member.mention} has {remaining} seconds left.")
+            if now >= silence_expires_at:
+                await self._finish_member_turn(member, "silence timeout")
+                return
+            if now >= next_warning_at:
+                remaining = max(0, round(time_expires_at - now))
+                if remaining > 0:
+                    await self.announce(f"{member.mention} has {remaining} seconds left.")
+                next_warning_at += 30
+                continue
 
-        await self._finish_member_turn(member, "time expired")
+            next_deadline = min(time_expires_at, silence_expires_at, next_warning_at)
+            wait_for = max(0, next_deadline - now)
+
+            try:
+                await asyncio.wait_for(self._speaker_activity_event.wait(), timeout=wait_for)
+            except asyncio.TimeoutError:
+                continue
+
+            self._speaker_activity_event.clear()
+            silence_expires_at = loop.time() + self.config.silence_timeout_seconds
 
     async def end_current_turn(self, reason: str) -> None:
         guild = self.guild
@@ -474,9 +496,16 @@ class DebateRoom:
     async def _manual_floor_pickup_timeout(
         self, member: discord.Member, event: asyncio.Event
     ) -> None:
+        picked_up = False
         try:
             await asyncio.wait_for(event.wait(), timeout=self.config.pickup_seconds)
+            picked_up = True
+            event.clear()
+            while await self.is_manual_floor_speaker(member):
+                await asyncio.wait_for(event.wait(), timeout=self.config.silence_timeout_seconds)
+                event.clear()
         except asyncio.TimeoutError:
-            await self._end_manual_floor(member, "pickup timeout", mute=True)
+            reason = "silence timeout" if picked_up else "pickup timeout"
+            await self._end_manual_floor(member, reason, mute=True)
         except asyncio.CancelledError:
             raise

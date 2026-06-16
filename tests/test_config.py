@@ -18,6 +18,7 @@ voice_channel_id = 456
 text_channel_id = 789
 mic_seconds = 90
 pickup_seconds = 5
+silence_timeout_seconds = 3
 instruction_interval_seconds = 600
 force_ptt = true
 """.strip(),
@@ -33,6 +34,7 @@ force_ptt = true
     assert config.rooms[0].text_channel_id == 789
     assert config.rooms[0].mic_seconds == 90
     assert config.rooms[0].pickup_seconds == 5
+    assert config.rooms[0].silence_timeout_seconds == 3
     assert config.rooms[0].instruction_interval_seconds == 600
     assert config.rooms[0].force_ptt is True
 
