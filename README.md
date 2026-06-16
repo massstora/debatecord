@@ -208,13 +208,13 @@ debatecord --config config.toml
 Or:
 
 ```bash
-.venv/bin/debatecord --config config.toml
+./debatecord --config config.toml
 ```
 
 Useful logging option:
 
 ```bash
-.venv/bin/debatecord --config config.toml --log-level DEBUG
+./debatecord --config config.toml --log-level DEBUG
 ```
 
 Leave the process running. If the bot stops, queues and active turns are lost.
